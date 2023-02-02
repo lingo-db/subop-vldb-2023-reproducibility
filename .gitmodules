@@ -1,0 +1,3 @@
+[submodule "lingo-db"]
+	path = lingo-db
+	url = git@github.com:lingo-db/lingo-db.git

@@ -1,0 +1,6 @@
+scikit-learn
+duckdb
+pandas
+scikit-network
+networkx
+Cython
