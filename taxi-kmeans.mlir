@@ -94,7 +94,7 @@ module {
         %offsetRef = subop.offset_ref_by %beginRef @view::@begin @generated::@idx @view::@ref({type=!subop.continous_view_entry_ref<!subop.continuous_view<!subop.buffer<[pointX : f64, pointY : f64, lucrativeness : !db.decimal<28, 21>]>>>})
         %gathered = subop.gather %offsetRef @view::@ref { pointX => @sample::@x({type=f64}),pointY => @sample::@y({type=f64}) }
         subop.materialize %gathered {@sample::@x=>initialClusterX, @sample::@y => initialClusterY, @generated::@id => initialClusterId}, %initialCentroids: !subop.buffer<[initialClusterX : f64, initialClusterY : f64, initialClusterId : i32]>
-
+        %timingStart = db.runtime_call "startTiming" () : () -> (i64)
 
         %finalCentroids = subop.loop %initialCentroids : !subop.buffer<[initialClusterX : f64, initialClusterY : f64, initialClusterId : i32]> (%centroids) -> !subop.buffer<[clusterX : f64, clusterY : f64, clusterId : i32]> {
                 %nextCentroids = subop.create !subop.buffer<[nextClusterX : f64, nextClusterY : f64, nextClusterId : i32]>
@@ -150,6 +150,11 @@ module {
                     %new_sum_x = arith.addf %sum_x, %curr_x : f64
                     %new_sum_y = arith.addf %sum_y, %curr_y : f64
                     tuples.return %new_sum_x,%new_sum_y, %new_count : f64,f64,i32
+                  } combine: ([%sumXa, %sumYa, %counta],[%sumXb, %sumYb, %countb]){
+                        %c_count = arith.addi %counta, %countb : i32
+                        %c_sum_x = arith.addf %sumXa, %sumXb : f64
+                        %c_sum_y = arith.addf %sumYa, %sumYb : f64
+                        tuples.return %c_sum_x,%c_sum_y,%c_count : f64,f64,i32
                   }
                  %fstream = subop.scan %hashmap : !subop.hashmap<[centroidId : i32],[sumX : f64, sumY : f64, count : i32]> {centroidId => @centroid::@id({type=i32}), sumX =>@hm::@sum_x({type=i32}) , sumY =>@hm::@sum_y({type=i32}),count => @hm::@count({type=i32})}
                  %fstream1 = subop.map %fstream computes : [@centroid::@x({type=f64}),@centroid::@y({type=f64})] (%tpl: !tuples.tuple){
@@ -217,6 +222,7 @@ module {
                   subop.scatter %s23 @s::@ref {@m::@p1 => ctr}
                  subop.loop_continue (%s23 [@m::@continue]) %nextCentroids : !subop.buffer<[nextClusterX : f64, nextClusterY : f64, nextClusterId : i32]>
         }
+                 db.runtime_call "stopTiming" (%timingStart) : (i64) -> ()
         %fstream1 = subop.scan %points : !subop.buffer<[pointX : f64, pointY : f64, lucrativeness : !db.decimal<28, 21>]> {pointX => @taxi_rides::@p_lon({type=f64}),pointY => @taxi_rides::@p_lat({type=f64}), lucrativeness => @map1::@tmp_attr1({type=!db.decimal<28, 21>})}
         %fstream2 = subop.nested_map %fstream1 [@taxi_rides::@p_lon,@taxi_rides::@p_lat](%t, %x, %y){
             %local_best = subop.create_simple_state !subop.simple_state<[min_dist_final: f64, arg_min_final : i32]> initial: {

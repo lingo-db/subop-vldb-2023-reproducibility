@@ -235,44 +235,5 @@ where c1.movie_id=c2.movie_id
   and it.info = 'genres'
   and mi.info='Drama'
   and mi.movie_id=c1.movie_id
-""").fetchdf()
-endDuckDB = time.time()
+""").fetchdf().to_csv('weld-data/imdb-pagerank-data.csv')
 
-useNetworkX=True
-pr_df=None
-if useNetworkX:
-    graphStart = time.time()
-    G = nx.from_pandas_edgelist(df, "person_id", "person_id_2")
-    graphEnd = time.time()
-    pagerankStart = time.time()
-    pr_df = pd.DataFrame(nx.pagerank(G, max_iter=100).items(), columns=["pid", "pr"])
-    pagerankEnd = time.time()
-else:
-    graphStart = time.time()
-    edge_list = list(df.itertuples(index=False))
-    graph = from_edge_list(edge_list, directed=True)
-    graphEnd = time.time()
-    pagerankStart = time.time()
-    pagerank = PageRank(n_iter=100,tol=0)
-    names=graph.names
-    pr=pagerank.fit_transform(graph.adjacency)
-    pr_df=pd.DataFrame.from_dict({"pid":names,"pr":pr})
-    pagerankEnd = time.time()
-
-
-startDuckDB2 = time.time()
-top10=con.execute("""
-select n.person_id,min(n.name),min(pr.pr) as pagerank
-from aka_name n, pr_df pr
-where n.person_id=pr.pid
-group by n.person_id
-order by pagerank desc
-limit 10 
-""").fetchdf()
-endDuckDB2 = time.time()
-end = time.time()
-
-print("DuckDB:",(endDuckDB - startDuckDB)+(endDuckDB2 - startDuckDB2))
-print("Graph Construction:",graphEnd - graphStart)
-print("PageRank:",pagerankEnd - pagerankStart)
-print(top10)

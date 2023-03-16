@@ -1,9 +1,13 @@
-import duckdb
+from tableauhyperapi import Connection, HyperException
+from tableauhyperapi import CreateMode
+from tableauhyperapi import HyperProcess
+from tableauhyperapi import Telemetry
 import pandas as pd
 import networkx as nx
 from sknetwork.data import from_edge_list
 from sknetwork.ranking import PageRank
 import time
+import os
 loadJob="""CREATE TABLE aka_name (
                           id integer NOT NULL,
                           person_id integer NOT NULL,
@@ -219,60 +223,49 @@ copy role_type from 'job-data/role_type.csv' csv escape '\\' null '';
 copy title from 'job-data/title.csv' csv escape '\\' null '';
 """
 
-con = duckdb.connect(database=':memory:')
-con.execute(loadJob)
-start = time.time()
-startDuckDB = time.time()
-df= con.execute("""
-select c1.person_id,c2.person_id
-from cast_info c1, cast_info c2, role_type r, movie_info mi, info_type it
-where c1.movie_id=c2.movie_id
-  and c1.role_id=r.id
-  and c2.role_id=r.id
-  and r.role='actor'
-  and c1.nr_order>c2.nr_order
-  and it.id=mi.info_type_id
-  and it.info = 'genres'
-  and mi.info='Drama'
-  and mi.movie_id=c1.movie_id
-""").fetchdf()
-endDuckDB = time.time()
+with HyperProcess(telemetry=Telemetry.DO_NOT_SEND_USAGE_DATA_TO_TABLEAU,parameters={"plan_cache_size": "0",
+                      "experimental_index_creation": "1",
+                      "experimental_storage_options": "1"
+                      }) as hyper:
+  with Connection(endpoint=hyper.endpoint, database="imdb.hyper", create_mode=CreateMode.CREATE_AND_REPLACE) as con:
+    for statement in loadJob.split(";"):
+      con.execute_command(statement)
+    print("done loading")
+    startDuckDB = time.time()
+    df= con.execute_list_query("""
+    with recursive edges(src,dst) as (
+    select c1.person_id,c2.person_id
+    from cast_info c1, cast_info c2, role_type r, movie_info mi, info_type it
+    where c1.movie_id=c2.movie_id
+      and c1.role_id=r.id
+      and c2.role_id=r.id
+      and r.role='actor'
+      and c1.nr_order>c2.nr_order
+      and it.id=mi.info_type_id
+      and it.info = 'genres'
+      and mi.info='Drama'
+      and mi.movie_id=c1.movie_id
+    ), pagerank ( iter , node , pr ) as (
+    select 0 , e.dst , 1::float /( select count (distinct dst) from edges)
+    from edges e group by e.dst
+    union
+    select iter +1 , dst ,0.1*((1:: float /( select count ( distinct dst ) from edges ) ) ) +0.9* sum( b )
+    from (
+    select iter , e.dst , p.pr /( select count (*) from edges x
+    where x.src = e.src ) as b
+    from edges e , pagerank p
+    where e.src = p.Node and iter < 100 ) i
+    group by dst , iter
+    )
+    select n.person_id,min(n.name),min(pr.pr) as r
+    from aka_name n, pagerank pr
+    where n.person_id=pr.node and pr.iter=100
+    group by n.person_id
+    order by r desc
+    limit 10 
+    """)
+    endDuckDB = time.time()
 
-useNetworkX=True
-pr_df=None
-if useNetworkX:
-    graphStart = time.time()
-    G = nx.from_pandas_edgelist(df, "person_id", "person_id_2")
-    graphEnd = time.time()
-    pagerankStart = time.time()
-    pr_df = pd.DataFrame(nx.pagerank(G, max_iter=100).items(), columns=["pid", "pr"])
-    pagerankEnd = time.time()
-else:
-    graphStart = time.time()
-    edge_list = list(df.itertuples(index=False))
-    graph = from_edge_list(edge_list, directed=True)
-    graphEnd = time.time()
-    pagerankStart = time.time()
-    pagerank = PageRank(n_iter=100,tol=0)
-    names=graph.names
-    pr=pagerank.fit_transform(graph.adjacency)
-    pr_df=pd.DataFrame.from_dict({"pid":names,"pr":pr})
-    pagerankEnd = time.time()
 
-
-startDuckDB2 = time.time()
-top10=con.execute("""
-select n.person_id,min(n.name),min(pr.pr) as pagerank
-from aka_name n, pr_df pr
-where n.person_id=pr.pid
-group by n.person_id
-order by pagerank desc
-limit 10 
-""").fetchdf()
-endDuckDB2 = time.time()
-end = time.time()
-
-print("DuckDB:",(endDuckDB - startDuckDB)+(endDuckDB2 - startDuckDB2))
-print("Graph Construction:",graphEnd - graphStart)
-print("PageRank:",pagerankEnd - pagerankStart)
-print(top10)
+    print("DuckDB:",(endDuckDB - startDuckDB))
+    print(df)

@@ -221,7 +221,6 @@ copy title from 'job-data/title.csv' csv escape '\\' null '';
 
 con = duckdb.connect(database=':memory:')
 con.execute(loadJob)
-con.execute("SET threads TO 1;");
 startDuckDB = time.time()
 df1 = con.execute("""
 select t.id,t.title

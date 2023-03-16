@@ -1,0 +1,12 @@
+*.csv
+*.hyper
+*.duckdb
+*.duckdb.*
+*.log
+job-data
+taxidb
+venv
+*.idea
+blackscholes.mlir
+haversine.mlir
+__pycache__
